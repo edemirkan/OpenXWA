@@ -1,0 +1,66 @@
+name: CI (aarch64)
+
+on:
+  push:
+    branches:
+      - feat-aarch64
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.build-type }}
+    # Native arm64 runner: the target track (SDL/FFmpeg/OpenXWA) builds at
+    # full speed with no emulation. Only the amd64 shader-tools stage in the
+    # Dockerfile needs QEMU, via the setup-qemu-action step below.
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        build-type: ${{ github.event_name == 'push' && fromJSON('["Release", "Debug"]') || fromJSON('["Release"]') }}
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Determine short commit hash
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Registers binfmt handlers so the amd64 shader-tools stage (DXC/
+      # shadercross -- see the Dockerfile's top-of-file comment) can run on
+      # this arm64 runner.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: amd64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build package
+        uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
+        with:
+          context: .
+          file: packaging/linux/Dockerfile.aarch64
+          platforms: linux/arm64
+          target: artifact
+          build-args: |
+            XWA_BUILD_TYPE=${{ matrix.build-type }}
+            XWA_VERSION=${{ steps.sha.outputs.short }}
+          outputs: type=local,dest=build/artifacts
+          cache-from: type=gha,scope=linux-aarch64
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=linux-aarch64' || '' }}
+
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: openxwa-linux-aarch64-${{ matrix.build-type == 'Debug' && 'debug' || 'release' }}
+          path: build/artifacts/*.tar.xz
+          if-no-files-found: error
