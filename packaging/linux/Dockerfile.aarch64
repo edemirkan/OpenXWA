@@ -28,6 +28,15 @@ ARG XWA_BUILD_PLATFORM=linux/${TARGETARCH}
 # independent of XWA_BUILD_PLATFORM -- see note above.
 ARG XWA_TOOLS_PLATFORM=linux/amd64
 
+# Declared before the first FROM so every stage can see the same default --
+# each stage that uses one of these still needs its own bare `ARG NAME` line
+# to pull the value in (Docker only auto-inherits pre-FROM args into FROM
+# lines themselves, not into RUN/etc. inside a stage).
+ARG SDL_VERSION=3.4.0
+ARG ZSTD_VERSION=1.5.7
+ARG FFMPEG_VERSION=8.0.1
+ARG SHADERCROSS_COMMIT=6b06e55c7c5d7e7a09a8a14f76e866dcfad5ab99
+
 FROM --platform=${XWA_BUILD_PLATFORM} debian:bookworm-slim AS build-base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -116,15 +125,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-ARG SDL_VERSION=3.4.0
-ARG ZSTD_VERSION=1.5.7
-ARG FFMPEG_VERSION=8.0.1
-ARG SHADERCROSS_COMMIT=6b06e55c7c5d7e7a09a8a14f76e866dcfad5ab99
-
 # The dependencies build as independent stages so that a version bump only
 # rebuilds the affected dependency and so that cold builds run concurrently.
 
 FROM build-base AS sdl-build
+
+ARG SDL_VERSION
 
 RUN git clone --branch "release-${SDL_VERSION}" --depth 1 \
         https://github.com/libsdl-org/SDL.git /deps/SDL \
@@ -142,6 +148,8 @@ RUN git clone --branch "release-${SDL_VERSION}" --depth 1 \
 # the shader-tools stage below) has something to link and run against.
 FROM build-base-host AS sdl-build-host
 
+ARG SDL_VERSION
+
 RUN git clone --branch "release-${SDL_VERSION}" --depth 1 \
         https://github.com/libsdl-org/SDL.git /deps/SDL \
     && cmake -S /deps/SDL -B /build/sdl -G Ninja \
@@ -156,6 +164,8 @@ RUN git clone --branch "release-${SDL_VERSION}" --depth 1 \
 
 FROM build-base AS zstd-build
 
+ARG ZSTD_VERSION
+
 RUN git clone --branch "v${ZSTD_VERSION}" --depth 1 \
         https://github.com/facebook/zstd.git /deps/zstd \
     && cmake -S /deps/zstd/build/cmake -B /build/zstd -G Ninja \
@@ -169,6 +179,8 @@ RUN git clone --branch "v${ZSTD_VERSION}" --depth 1 \
     && cmake --install /build/zstd
 
 FROM build-base AS ffmpeg-build
+
+ARG FFMPEG_VERSION
 
 RUN git clone --branch "n${FFMPEG_VERSION}" --depth 1 \
         https://github.com/FFmpeg/FFmpeg.git /deps/FFmpeg \
@@ -194,6 +206,8 @@ RUN git clone --branch "n${FFMPEG_VERSION}" --depth 1 \
     && make install
 
 FROM build-base-host AS shader-tools
+
+ARG SHADERCROSS_COMMIT
 
 COPY packaging/common/shadercross-fsr3.patch /tmp/shadercross-fsr3.patch
 
