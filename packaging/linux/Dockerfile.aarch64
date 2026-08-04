@@ -272,6 +272,25 @@ ARG TARGETARCH
 ARG XWA_BUILD_TYPE=Release
 ARG XWA_VERSION=0.0.0-dev
 
+# The amd64 shadercross tool copied in below is dynamically linked. QEMU's
+# binfmt handler translates its instructions, but it still needs an actual
+# amd64 ELF interpreter and libc on disk to start -- neither exists in this
+# arm64 rootfs otherwise. Multiarch installs them under architecture-specific
+# paths (/usr/lib/x86_64-linux-gnu/) alongside the native arm64 libraries
+# without colliding, and puts the loader at the exact path amd64 binaries
+# expect (/lib64/ld-linux-x86-64.so.2). Skipped when the target itself is
+# amd64, since shadercross then already matches the stage's native arch.
+RUN if [ "${TARGETARCH}" != "amd64" ]; then \
+        dpkg --add-architecture amd64 \
+        && apt-get update \
+        && apt-get install -y --no-install-recommends \
+            libc6:amd64 \
+            libgcc-s1:amd64 \
+            libstdc++6:amd64 \
+            zlib1g:amd64 \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
+
 COPY --from=sdl-build /opt/xwa-linux /opt/xwa-linux
 COPY --from=zstd-build /opt/xwa-linux /opt/xwa-linux
 COPY --from=ffmpeg-build /opt/xwa-linux /opt/xwa-linux
