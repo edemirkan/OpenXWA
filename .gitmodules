@@ -1,3 +1,3 @@
 [submodule "aeron"]
 	path = aeron
-	url = git@github.com:elyosh/aeron.git
+	url = git@github.com:edemirkan/Aeron.git
