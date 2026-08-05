@@ -32,7 +32,7 @@ ARG XWA_TOOLS_PLATFORM=linux/amd64
 # each stage that uses one of these still needs its own bare `ARG NAME` line
 # to pull the value in (Docker only auto-inherits pre-FROM args into FROM
 # lines themselves, not into RUN/etc. inside a stage).
-ARG SDL_VERSION=3.4.0
+ARG SDL_VERSION=3.4.14
 ARG ZSTD_VERSION=1.5.7
 ARG FFMPEG_VERSION=8.0.1
 ARG SHADERCROSS_COMMIT=6b06e55c7c5d7e7a09a8a14f76e866dcfad5ab99
