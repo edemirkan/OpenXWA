@@ -52,6 +52,7 @@ add_library(xwa_2d_formats STATIC
     src/xwa_formats/xwa_2d/xwa_frontend_image.c
 )
 target_include_directories(xwa_2d_formats PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/xwa_formats/xwa_2d)
+target_link_libraries(xwa_2d_formats PUBLIC aeron_asset)
 set_target_properties(xwa_2d_formats PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 if(NOT MSVC)
     target_link_libraries(xwa_2d_formats PRIVATE m)

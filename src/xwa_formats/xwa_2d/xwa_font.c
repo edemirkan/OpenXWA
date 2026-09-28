@@ -1,10 +1,7 @@
 #include "xwa_2d_internal.h"
 
-#include <math.h>
+#include "aeron/asset/abp_font.h"
 
-#define ABP_HEADER_SIZE 0x60bu
-#define FONT_COLUMNS 16
-#define FONT_GUTTER 1
 #define FLIGHT_FONT_FIRST_GLYPH 32
 #define FLIGHT_FONT_GLYPH_COUNT 256
 #define FLIGHT_FONT_COLUMNS 16
@@ -23,119 +20,42 @@ static const FlightFontTierDesc flight_font_tiers[3] = {
 	{ 2, 10, 1 },
 };
 
-static uint8_t font_alpha(uint8_t value) {
-	float encoded = (float)((value & 0x1fu) + 1u) / 32.0f;
-	float linear = encoded <= 0.04045f ? encoded / 12.92f : powf((encoded + 0.055f) / 1.055f, 2.4f);
-	return (uint8_t)(linear * 255.0f + 0.5f);
-}
-
-static int decode_glyph(const uint8_t* data, const uint8_t* end, int width, int height, uint8_t* alpha) {
-	memset(alpha, 0, (size_t)width * height);
-	const uint8_t* row = data;
-	for (int y = 0; y < height; y++) {
-		if ((size_t)(end - row) < 4)
-			return 0;
-		uint32_t row_size = xwa2d_u32(row);
-		if (row_size <= 4 || row_size > (uint32_t)(end - row))
-			return 0;
-		const uint8_t* p = row + 4;
-		const uint8_t* row_end = row + row_size;
-		int x = 0;
-		while (p < row_end) {
-			uint8_t token = *p++;
-			if (token == 0x80)
-				break;
-			if (token & 0x80u) {
-				int length = token & 0x7f;
-				if (length > row_end - p)
-					return 0;
-				for (int i = 0; i < length && x + i < width; i++)
-					alpha[(size_t)y * width + x + i] = font_alpha(p[i]);
-				p += length;
-				x += length;
-			} else if (token & 0x40u) {
-				x += token & 0x3f;
-			} else {
-				if (!token || p >= row_end)
-					return 0;
-				uint8_t value = font_alpha(*p++);
-				for (int i = 0; i < token && x + i < width; i++)
-					alpha[(size_t)y * width + x + i] = value;
-				x += token;
-			}
-		}
-		row = row_end;
-	}
-	return 1;
-}
-
 int Xwa2d_DecodeAbpFont(const uint8_t* bytes, size_t size, Xwa2dFontAtlas* out, char* error,
 						size_t error_size) {
-	if (!bytes || !out || size < ABP_HEADER_SIZE)
-		return xwa2d_fail(error, error_size, "invalid ABP input");
+	if (!out)
+		return xwa2d_fail(error, error_size, "invalid ABP output");
 	memset(out, 0, sizeof *out);
-	uint32_t blob_size = xwa2d_u32(bytes);
-	if (blob_size > size - ABP_HEADER_SIZE)
-		return xwa2d_fail(error, error_size, "truncated ABP glyph data");
-	int cell_width = 1;
-	int cell_height = 1;
-	for (int i = 0; i < 256; i++) {
-		if (bytes[0x504 + i] > cell_width)
-			cell_width = bytes[0x504 + i];
-		if (bytes[0x404 + i] > cell_height)
-			cell_height = bytes[0x404 + i];
+	AeronDecodedFont font = { 0 };
+	AeronDecodeError decode_error = { 0 };
+	if (!AeronAbpFont_Decode(bytes, size, &font, &decode_error))
+		return xwa2d_fail(error, error_size, "%s", decode_error.message);
+	out->rgba = calloc((size_t)font.width * font.height, 4);
+	out->glyphs = calloc(font.glyph_count, sizeof *out->glyphs);
+	if (!out->rgba || !out->glyphs) {
+		AeronDecodedFont_Free(&font);
+		Xwa2dFontAtlas_Free(out);
+		return xwa2d_fail(error, error_size, "ABP RGBA allocation failed");
 	}
-	int stride_width = cell_width + 2 * FONT_GUTTER;
-	int stride_height = cell_height + 2 * FONT_GUTTER;
-	out->width = FONT_COLUMNS * stride_width;
-	out->height = 16 * stride_height;
-	out->cell_width = cell_width;
-	out->cell_height = cell_height;
-	out->baseline = cell_height;
-	out->first_char = 0;
-	out->glyph_count = 256;
-	out->rgba = (uint8_t*)calloc((size_t)out->width * out->height, 4);
-	out->glyphs = (Xwa2dGlyph*)calloc(256, sizeof *out->glyphs);
-	uint8_t* alpha = (uint8_t*)malloc((size_t)cell_width * cell_height);
-	if (!out->rgba || !out->glyphs || !alpha)
-		goto oom;
-	const uint8_t* blob = bytes + ABP_HEADER_SIZE;
-	const uint8_t* blob_end = blob + blob_size;
-	uint8_t spacing = bytes[0x609];
-	for (int glyph = 0; glyph < 256; glyph++) {
-		int width = bytes[0x504 + glyph];
-		int height = bytes[0x404 + glyph];
-		uint32_t offset = xwa2d_u32(bytes + 4 + 4 * glyph);
-		Xwa2dGlyph* metric = &out->glyphs[glyph];
-		metric->x = (uint16_t)((glyph % 16) * stride_width + FONT_GUTTER);
-		metric->y = (uint16_t)((glyph / 16) * stride_height + FONT_GUTTER);
-		metric->width = (uint16_t)width;
-		metric->height = (uint16_t)height;
-		metric->advance = (uint16_t)(width + spacing);
-		if (!width || !height)
-			continue;
-		if (offset >= blob_size || !decode_glyph(blob + offset, blob_end, width, height, alpha))
-			goto malformed;
-		for (int y = 0; y < height; y++) {
-			for (int x = 0; x < width; x++) {
-				uint8_t coverage = alpha[(size_t)y * width + x];
-				uint8_t* pixel = out->rgba + (((size_t)metric->y + y) * out->width + metric->x + x) * 4;
-				pixel[0] = pixel[1] = pixel[2] = 0xff;
-				pixel[3] = coverage;
+	for (uint16_t i = 0; i < font.glyph_count; ++i) {
+		const AeronDecodedGlyph* glyph = &font.glyphs[i];
+		out->glyphs[i] = (Xwa2dGlyph) { glyph->x, glyph->y, glyph->width, glyph->height, glyph->advance };
+		for (uint16_t y = 0; y < glyph->height; ++y) {
+			for (uint16_t x = 0; x < glyph->width; ++x) {
+				const size_t pixel = (size_t)(glyph->y + y) * font.width + glyph->x + x;
+				memset(out->rgba + pixel * 4, 255, 3);
+				out->rgba[pixel * 4 + 3] = font.foreground[pixel];
 			}
 		}
 	}
-	free(alpha);
+	out->width = font.width;
+	out->height = font.height;
+	out->cell_width = font.cell_width;
+	out->cell_height = font.cell_height;
+	out->baseline = font.baseline;
+	out->first_char = font.first_char;
+	out->glyph_count = font.glyph_count;
+	AeronDecodedFont_Free(&font);
 	return 1;
-
-oom:
-	free(alpha);
-	Xwa2dFontAtlas_Free(out);
-	return xwa2d_fail(error, error_size, "ABP allocation failed");
-malformed:
-	free(alpha);
-	Xwa2dFontAtlas_Free(out);
-	return xwa2d_fail(error, error_size, "malformed ABP glyph data");
 }
 
 static int flight_glyph_advance(const Xwa2dFrame* source, int glyph, int size, int padding) {
