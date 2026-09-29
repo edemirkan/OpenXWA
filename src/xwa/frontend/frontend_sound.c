@@ -17,23 +17,6 @@
 
 enum { DSERR_BUFFERLOST = (int)0x88780096u };
 
-typedef struct FrontendDirectSound FrontendDirectSound;
-typedef struct FrontendDirectSoundVtbl {
-	void* QueryInterface;
-	void* AddRef;
-	int(AERON_DXAPI* Release)(FrontendDirectSound* self);
-	int(AERON_DXAPI* CreateSoundBuffer)(FrontendDirectSound* self, const DSBufferDesc* desc, void** buffer,
-										void* outer);
-	void* GetCaps;
-	int(AERON_DXAPI* DuplicateSoundBuffer)(FrontendDirectSound* self, IDirectSoundBuffer* source,
-										   IDirectSoundBuffer** duplicate);
-	int(AERON_DXAPI* SetCooperativeLevel)(FrontendDirectSound* self, void* hwnd, uint32_t level);
-} FrontendDirectSoundVtbl;
-
-struct FrontendDirectSound {
-	const FrontendDirectSoundVtbl* lpVtbl;
-};
-
 // GLOBAL: XWA 0x9F7F0F
 void* g_frontendDirectSound;
 // GLOBAL: XWA 0x9F7F13
@@ -420,7 +403,7 @@ static int DirectSound_CopyWaveDataToBuffer(IDirectSoundBuffer* buffer, const vo
 
 // FUNCTION: XWA 0x539000
 IDirectSoundBuffer* DirectSound_LoadWaveBuffer(void* directSound, char* fileName, int create3DFlags) {
-	FrontendDirectSound* device = (FrontendDirectSound*)directSound;
+	IDirectSound* device = (IDirectSound*)directSound;
 	DSBufferDesc desc;
 	DSWaveFormat* format = NULL;
 	void* sampleData = NULL;
@@ -443,7 +426,7 @@ IDirectSoundBuffer* DirectSound_LoadWaveBuffer(void* directSound, char* fileName
 		desc.dwBufferBytes = sampleBytes;
 		desc.lpwfxFormat = format;
 
-		if (device->lpVtbl->CreateSoundBuffer(device, &desc, (void**)&buffer, NULL) >= 0) {
+		if (device->lpVtbl->CreateSoundBuffer(device, &desc, &buffer, NULL) >= 0) {
 			if (DirectSound_CopyWaveDataToBuffer(buffer, sampleData, sampleBytes)) {
 				goto done;
 			}
@@ -497,7 +480,7 @@ void DirectSound_ReleaseBufferPtr(IDirectSoundBuffer** bufferPtr) {
 // FUNCTION: XWA 0x539420
 int DirectSound_CreateWaveBuffer(void* directSound, IDirectSoundBuffer** outBuffer, uint32_t bufferBytes,
 								 DSWaveFormat* format, int create3DFlags) {
-	FrontendDirectSound* device = (FrontendDirectSound*)directSound;
+	IDirectSound* device = (IDirectSound*)directSound;
 	DSBufferDesc desc;
 	DSWaveFormat defaultFormat;
 	int result;
@@ -527,7 +510,7 @@ int DirectSound_CreateWaveBuffer(void* directSound, IDirectSoundBuffer** outBuff
 		desc.lpwfxFormat = format;
 	}
 
-	result = device->lpVtbl->CreateSoundBuffer(device, &desc, (void**)outBuffer, NULL);
+	result = device->lpVtbl->CreateSoundBuffer(device, &desc, outBuffer, NULL);
 	if (result < 0) {
 		*outBuffer = NULL;
 	}
@@ -595,7 +578,7 @@ unsigned int DirectSound_CreateStreamingWaveBuffer(void* directSound, IDirectSou
 
 // FUNCTION: XWA 0x538100
 int FrontendSound_InitDirectSound(void* hwnd) {
-	FrontendDirectSound* device;
+	IDirectSound* device;
 	DSBufferDesc primaryDesc;
 	int i;
 
@@ -625,7 +608,7 @@ int FrontendSound_InitDirectSound(void* hwnd) {
 		return 0;
 	}
 
-	device = (FrontendDirectSound*)g_frontendDirectSound;
+	device = (IDirectSound*)g_frontendDirectSound;
 
 	// Primary buffer is a control handle; the Aeron device owns the real output
 	// format, so the original GetCaps/SetFormat(22050,16,stereo) calls are not
@@ -633,7 +616,7 @@ int FrontendSound_InitDirectSound(void* hwnd) {
 	memset(&primaryDesc, 0, sizeof(primaryDesc));
 	primaryDesc.dwSize = 20;
 	primaryDesc.dwFlags = DSBCAPS_PRIMARYBUFFER;
-	if (device->lpVtbl->CreateSoundBuffer(device, &primaryDesc, (void**)&g_frontendPrimarySoundBuffer, NULL) <
+	if (device->lpVtbl->CreateSoundBuffer(device, &primaryDesc, &g_frontendPrimarySoundBuffer, NULL) <
 			0 ||
 		device->lpVtbl->SetCooperativeLevel(device, hwnd, 2) < 0) {
 		FrontendSound_ShutdownDirectSound();
@@ -671,7 +654,7 @@ int FrontendSound_ShutdownDirectSound(void) {
 #else
 	g_frontendPrimarySoundBuffer->lpVtbl->Release(g_frontendPrimarySoundBuffer);
 #endif
-	((FrontendDirectSound*)g_frontendDirectSound)->lpVtbl->Release(g_frontendDirectSound);
+	((IDirectSound*)g_frontendDirectSound)->lpVtbl->Release(g_frontendDirectSound);
 	g_frontendDirectSound = NULL;
 
 	if (g_frontendSoundBuffers) {
@@ -837,8 +820,8 @@ int FrontendSound_PlayUISound(char* soundName, int allowRestartExisting, int loo
 	{
 		IDirectSoundBuffer* playBuffer;
 
-		((FrontendDirectSound*)g_frontendDirectSound)
-			->lpVtbl->DuplicateSoundBuffer((FrontendDirectSound*)g_frontendDirectSound,
+		((IDirectSound*)g_frontendDirectSound)
+			->lpVtbl->DuplicateSoundBuffer((IDirectSound*)g_frontendDirectSound,
 										   g_frontendSoundBuffers[bufferIndex].buffer, &playBuffer);
 		if (playBuffer == NULL) {
 			if (wasBackBufferLocked) {

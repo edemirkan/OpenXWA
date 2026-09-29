@@ -19,7 +19,6 @@ extern "C" {
 #define XWA_STDCALL
 #endif
 
-typedef struct IDirectSoundBuffer   IDirectSoundBuffer;
 typedef struct IDirectSound3DBuffer IDirectSound3DBuffer;
 
 /* Runtime-only sound definition. The original stored 32-bit DirectSound
@@ -34,37 +33,6 @@ typedef struct SoundEffectDef {
 	uint8_t               currentPriority;
 } SoundEffectDef;
 #pragma pack(pop)
-
-typedef struct IDirectSoundBufferVtbl {
-	int (XWA_STDCALL* QueryInterface)(IDirectSoundBuffer* self, const void* iid, void** out);
-	void* AddRef;
-	int (XWA_STDCALL* Release)(IDirectSoundBuffer* self);
-	int (XWA_STDCALL* GetCaps)(IDirectSoundBuffer* self, DSBufferCaps* caps);
-	int (XWA_STDCALL* GetCurrentPosition)(IDirectSoundBuffer* self, uint32_t* playCursor,
-										 uint32_t* writeCursor);
-	int (XWA_STDCALL* GetFormat)(IDirectSoundBuffer* self, void* format, uint32_t size, uint32_t* written);
-	void* GetVolume;
-	void* GetPan;
-	void* GetFrequency;
-	int (XWA_STDCALL* GetStatus)(IDirectSoundBuffer* self, uint32_t* status);
-	void* Initialize;
-	int (XWA_STDCALL* Lock)(IDirectSoundBuffer* self, uint32_t offset, uint32_t bytes, void** audioPtr1,
-							  uint32_t* audioBytes1, void** audioPtr2, uint32_t* audioBytes2, uint32_t flags);
-	int (XWA_STDCALL* Play)(IDirectSoundBuffer* self, uint32_t reserved1, uint32_t priority, uint32_t flags);
-	int (XWA_STDCALL* SetCurrentPosition)(IDirectSoundBuffer* self, uint32_t position);
-	int (XWA_STDCALL* SetFormat)(IDirectSoundBuffer* self, const DSWaveFormat* format);
-	int (XWA_STDCALL* SetVolume)(IDirectSoundBuffer* self, int volume);
-	int (XWA_STDCALL* SetPan)(IDirectSoundBuffer* self, int pan);
-	int (XWA_STDCALL* SetFrequency)(IDirectSoundBuffer* self, int frequency);
-	int (XWA_STDCALL* Stop)(IDirectSoundBuffer* self);
-	int (XWA_STDCALL* Unlock)(IDirectSoundBuffer* self, void* audioPtr1, uint32_t audioBytes1,
-								void* audioPtr2, uint32_t audioBytes2);
-	int (XWA_STDCALL* Restore)(IDirectSoundBuffer* self);
-} IDirectSoundBufferVtbl;
-
-struct IDirectSoundBuffer {
-	const IDirectSoundBufferVtbl* lpVtbl;
-};
 
 typedef struct IDirectSound3DBufferVtbl {
 	void* QueryInterface;     /* 0 */
@@ -119,27 +87,6 @@ typedef struct IDirectSound3DListenerVtbl {
 
 struct IDirectSound3DListener {
 	const IDirectSound3DListenerVtbl* lpVtbl;
-};
-
-typedef struct IDirectSound IDirectSound;
-typedef struct IDirectSoundVtbl {
-	void* QueryInterface; /* 0 */
-	void* AddRef;         /* 1 */
-	int (XWA_STDCALL* Release)(IDirectSound* self); /* 2 */
-	int (XWA_STDCALL* CreateSoundBuffer)(IDirectSound* self, const DSBufferDesc* desc,
-										 IDirectSoundBuffer** buffer, void* outer); /* 3 */
-	int (XWA_STDCALL* GetCaps)(IDirectSound* self, DSoundDeviceCaps* caps); /* 4 */
-	int (XWA_STDCALL* DuplicateSoundBuffer)(IDirectSound* self, IDirectSoundBuffer* source,
-											IDirectSoundBuffer** duplicate); /* 5 */
-	int (XWA_STDCALL* SetCooperativeLevel)(IDirectSound* self, void* hwnd, uint32_t level); /* 6 */
-	void* Compact; /* 7 */
-	int (XWA_STDCALL* GetSpeakerConfig)(IDirectSound* self, uint32_t* config); /* 8 */
-	void* SetSpeakerConfig; /* 9 */
-	void* Initialize;       /* 10 */
-} IDirectSoundVtbl;
-
-struct IDirectSound {
-	const IDirectSoundVtbl* lpVtbl;
 };
 
 #pragma pack(push, 1)
