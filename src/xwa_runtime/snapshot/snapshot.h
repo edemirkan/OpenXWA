@@ -347,7 +347,7 @@ typedef struct XwaFlightObject {
 								  * preserve the full engine value — billboard
 								  * size narrows only after its classic scaling) */
 	/* Debris-chunk spin pivot (MobileObject.renderOffset* — the detached
-	 * component's focus point in model space, set at detach from the
+	 * component's focus point in native OPT units, set at detach from the
 	 * mesh descriptor). */
 	float render_offset[3];
 	/* Exact engine coordinates. Renderers subtract their frame/view origin

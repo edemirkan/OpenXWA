@@ -778,17 +778,22 @@ int XwaRemasterShip_BuildDebrisMeshTable(const XwaFlightObject* f, AeronSceneMes
 		out->emissive_packed[mi >> 2][mi & 3] = 1.0f;
 	}
 	if (f->spin_angle != 0) {
+		/* Snapshots retain native OPT units; the mesh table acts on metres. */
+		const float pivot[3] = {
+			f->render_offset[0] * AERON_OPT_METERS_PER_UNIT,
+			f->render_offset[1] * AERON_OPT_METERS_PER_UNIT,
+			f->render_offset[2] * AERON_OPT_METERS_PER_UNIT,
+		};
 		/* The classic draw-site spin (render_scene_core debris block)
 		 * runs the same BuildAxisAngleMatrix/MulMatrix3x3(T) chain as
 		 * the rotary meshes, netting -angle on the vertices — negate
 		 * for the straight-consumed table (see BuildMeshTable). It
 		 * composes with the basis spin FVIEW_calcrotateorient already
 		 * applied (the captured rows / Euler mirror include it) — the
-		 * classic applies both. renderOffset/spin_axis are OPT-native
-		 * model space, the cooked mesh's runtime space (the loader's
-		 * swap_yz3 round-trips the glTF axis swap). */
+		 * classic applies both. The spin axis uses the same model-space
+		 * directions as the cooked mesh. */
 		const float angle = (float)f->spin_angle * (-2.0f * 3.14159265358979323846f / 65536.0f);
-		ship_mat3x4_rotation_about_pivot(out->rows[comp], f->spin_axis, f->render_offset, angle);
+		ship_mat3x4_rotation_about_pivot(out->rows[comp], f->spin_axis, pivot, angle);
 	}
 	return 1;
 }
