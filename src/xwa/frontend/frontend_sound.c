@@ -15,6 +15,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifndef XWA_MODERN
+int __stdcall A3D_CreateDirectSound(const DSCompatGuid* deviceGuid, void** outDevice, void* outerUnknown);
+extern void(__stdcall* g_OutputDebugStringA)(const char* outputString);
+#endif
+
 enum { DSERR_BUFFERLOST = (int)0x88780096u };
 
 // GLOBAL: XWA 0x9F7F0F
@@ -488,10 +493,6 @@ int DirectSound_CreateWaveBuffer(void* directSound, IDirectSoundBuffer** outBuff
 	memset(&desc, 0, sizeof(desc));
 	desc.dwSize = 20;
 	desc.dwFlags = create3DFlags != 0 ? 194u : 234u;
-#ifdef XWA_MODERN
-	// The compatibility shim needs an explicit marker to distinguish this streaming buffer.
-	desc.dwFlags |= (uint32_t)DSBCAPS_GETCURRENTPOSITION2;
-#endif
 	desc.dwBufferBytes = bufferBytes;
 	if (format == NULL) {
 #ifdef XWA_MODERN
@@ -578,51 +579,75 @@ unsigned int DirectSound_CreateStreamingWaveBuffer(void* directSound, IDirectSou
 
 // FUNCTION: XWA 0x538100
 int FrontendSound_InitDirectSound(void* hwnd) {
-	IDirectSound* device;
+	DSoundDeviceCaps deviceCaps;
 	DSBufferDesc primaryDesc;
+	DSWaveFormat primaryFormat;
 	int i;
+	int use3D;
 
-	if (g_frontendDirectSound != NULL) {
-		return 1;
-	}
-	if (g_frontendSoundVoices == NULL || g_frontendSoundBuffers == NULL) {
-		return 0;
-	}
+	if (g_frontendDirectSound == NULL) {
+		if (g_frontendSoundVoices == NULL)
+			return 0;
+		if (g_frontendSoundBuffers == NULL)
+			return 0;
 
-	for (i = 0; i < FRONTEND_SOUND_VOICE_COUNT; ++i) {
-		g_frontendSoundVoices[i].bufferIndex = -1;
-		g_frontendSoundVoices[i].playSerial = 0;
-		g_frontendSoundVoices[i].buffer = NULL;
-	}
-	g_frontendActiveVoiceCount = 0;
-	g_frontendSoundBufferCount = 0;
-	g_frontendSoundPlaySerial = 0;
-	for (i = 0; i < 128; ++i) {
-		g_frontendSoundBuffers[i].buffer = NULL;
-		g_frontendSoundBuffers[i].name[0] = '\0';
-	}
+		for (i = 0; i < FRONTEND_SOUND_VOICE_COUNT; ++i) {
+			g_frontendSoundVoices[i].bufferIndex = -1;
+			g_frontendSoundVoices[i].playSerial = 0;
+			g_frontendSoundVoices[i].buffer = NULL;
+		}
+		g_frontendActiveVoiceCount = 0;
+		g_frontendSoundBufferCount = 0;
+		g_frontendSoundPlaySerial = 0;
+		for (i = 0; i < 128; ++i) {
+			g_frontendSoundBuffers[i].buffer = NULL;
+			g_frontendSoundBuffers[i].name[0] = '\0';
+		}
 
-	// DEVIATION: the original probes A3D (Aureal) then DirectSoundCreate; the
-	// port routes straight to the Aeron-backed DirectSound shim.
-	if (DirectSoundCreate(NULL, &g_frontendDirectSound, NULL) < 0) {
-		return 0;
+#ifdef XWA_MODERN
+		/* The modern backend creates the software DirectSound device. */
+		if (DirectSoundCreate(NULL, &g_frontendDirectSound, NULL) != 0)
+			return 0;
+#else
+		if (A3D_CreateDirectSound(NULL, &g_frontendDirectSound, NULL) < 0) {
+			g_OutputDebugStringA("A3dCreate failed.\n");
+			if (g_frontendDirectSound == NULL && DirectSoundCreate(NULL, &g_frontendDirectSound, NULL) != 0)
+				return 0;
+		} else {
+			g_OutputDebugStringA("A3D Object created successfully.\n");
+		}
+#endif
+		memset(&deviceCaps, 0, sizeof(deviceCaps));
+		deviceCaps.dwSize = sizeof(deviceCaps);
+		((IDirectSound*)g_frontendDirectSound)->lpVtbl->GetCaps(g_frontendDirectSound, &deviceCaps);
+
+		use3D = deviceCaps.dwMaxHw3DAllBuffers != 0;
+		memset(&primaryDesc, 0, sizeof(primaryDesc));
+		primaryDesc.dwFlags = use3D ? DSBCAPS_PRIMARYBUFFER | DSBCAPS_CTRL3D : DSBCAPS_PRIMARYBUFFER;
+		primaryDesc.dwSize = 20;
+		primaryDesc.dwBufferBytes = 0;
+		primaryDesc.lpwfxFormat = NULL;
+		if (((IDirectSound*)g_frontendDirectSound)
+				->lpVtbl->CreateSoundBuffer(g_frontendDirectSound, &primaryDesc,
+											&g_frontendPrimarySoundBuffer, NULL) < 0) {
+			FrontendSound_ShutdownDirectSound();
+			return 0;
+		}
+		if (((IDirectSound*)g_frontendDirectSound)
+				->lpVtbl->SetCooperativeLevel(g_frontendDirectSound, hwnd, 2) < 0) {
+			FrontendSound_ShutdownDirectSound();
+			return 0;
+		}
+
+		memset(&primaryFormat, 0, sizeof(primaryFormat));
+		primaryFormat.wFormatTag = 1;
+		primaryFormat.nChannels = 2;
+		primaryFormat.nSamplesPerSec = 22050;
+		primaryFormat.wBitsPerSample = 16;
+		primaryFormat.nBlockAlign = 4;
+		primaryFormat.nAvgBytesPerSec = 88200;
+		g_frontendPrimarySoundBuffer->lpVtbl->SetFormat(g_frontendPrimarySoundBuffer, &primaryFormat);
 	}
-
-	device = (IDirectSound*)g_frontendDirectSound;
-
-	// Primary buffer is a control handle; the Aeron device owns the real output
-	// format, so the original GetCaps/SetFormat(22050,16,stereo) calls are not
-	// needed (DEVIATION: no hardware-cap query, no primary format set).
-	memset(&primaryDesc, 0, sizeof(primaryDesc));
-	primaryDesc.dwSize = 20;
-	primaryDesc.dwFlags = DSBCAPS_PRIMARYBUFFER;
-	if (device->lpVtbl->CreateSoundBuffer(device, &primaryDesc, &g_frontendPrimarySoundBuffer, NULL) <
-			0 ||
-		device->lpVtbl->SetCooperativeLevel(device, hwnd, 2) < 0) {
-		FrontendSound_ShutdownDirectSound();
-		return 0;
-	}
-
 	return 1;
 }
 

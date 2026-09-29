@@ -1,4 +1,7 @@
 #include "xwa/audio/sound.h"
+#ifdef XWA_MODERN
+#include "xwa/assets/file_io.h"
+#endif
 #include "xwa/audio/fsfx.h"
 #include "xwa/audio/music.h"
 #include "xwa/config/game_config.h"
@@ -85,21 +88,23 @@ uint8_t Sound_Init_Sound_Engine(void* hwnd) {
 		g_maxActiveSounds = 32;
 	}
 
-#ifdef XWA_MODERN
-	/* The Aeron shim exposes no hardware buffers, so forced resampling does not
-	 * apply to the modern audio path. */
-	g_flightConfAudio22k = 0;
-#else
 	{
+#ifdef XWA_MODERN
+		XwaFile* force22kFile = File_Open(AERON_VFS_ROOT_ASSET, "force22k.txt", "r");
+#else
 		FILE* force22kFile = fopen("force22k.txt", "r");
+#endif
 		if (force22kFile) {
 			g_flightConfAudio22k = 1;
+#ifdef XWA_MODERN
+			File_Close(force22kFile);
+#else
 			fclose(force22kFile);
+#endif
 		} else {
 			g_flightConfAudio22k = 0;
 		}
 	}
-#endif
 
 	if (g_directSound) {
 		DebugPrintf("ERROR:Already a DS object in Aldraw_Init_Sound_Engine");
