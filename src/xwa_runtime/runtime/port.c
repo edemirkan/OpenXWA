@@ -29,6 +29,7 @@
 #include "xwa_runtime/input/mouse_flight.h"
 #include "xwa_runtime/input/rumble_provider.h"
 #include "xwa_runtime/input/winmm_joystick_provider.h"
+#include "xwa_runtime/runtime/flight_pause_task.h"
 #include "xwa_runtime/runtime/flight_task.h"
 #include "xwa_runtime/runtime/frontend_task.h"
 #include "xwa_runtime/runtime/movie_task.h"
@@ -227,6 +228,7 @@ static void XwaPort_TickBody(int32_t delta_us) {
 	}
 
 	if (XwaFlightTask_IsActive()) {
+		const int wasPaused = XwaFlightPauseTask_IsActive();
 		XwaSnapshot_SetSceneKind(XWA_SCENE_FLIGHT);
 		input = Aeron_InputSnapshot();
 		/* Capture this host frame's keyboard/mouse edges into the DirectInput shim so
@@ -269,6 +271,11 @@ static void XwaPort_TickBody(int32_t delta_us) {
 		}
 
 		XwaFlightTask_Tick();
+		if (wasPaused) {
+			/* Retain the complete paused view, including captured HUD draws.
+			 * The resume frame also skips simulation and snapshot publication. */
+			return;
+		}
 		if (XwaFlightTask_IsComplete()) {
 			flightResult = XwaFlightTask_Shutdown();
 			/* Shutdown ends the flight-only suppression scope. Frontend surface

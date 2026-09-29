@@ -1,4 +1,5 @@
 #include "xwa_runtime/runtime/flight_task.h"
+#include "xwa_runtime/runtime/flight_pause_task.h"
 #include "xwa/flight/hangar.h"
 
 #include "aeron/aeron.h"
@@ -866,6 +867,7 @@ static void XwaFlightTask_RunHangarReadyFrame(void) {
 }
 
 static void XwaFlightTask_RequestInstanceCleanup(int restartMission) {
+	XwaFlightPauseTask_Shutdown();
 	g_xwaFlightTaskRestartMission = restartMission;
 	g_xwaFlightTaskPhase = XWA_FLIGHT_TASK_PHASE_INSTANCE_CLEANUP;
 }
@@ -1191,6 +1193,7 @@ int XwaFlightTask_Init(char* missionCmdLine, const char* filmFilePath) {
 	int localId;
 	int configIndex;
 
+	XwaFlightPauseTask_Shutdown();
 	g_xwaFlightTaskActive = 0;
 	g_xwaFlightTaskComplete = 0;
 	g_xwaFlightTaskResult = 0;
@@ -1322,6 +1325,10 @@ void XwaFlightTask_Tick(void) {
 		return;
 	}
 	nowUs = XwaTime_GetElapsedUs();
+	if (XwaFlightPauseTask_Tick()) {
+		g_xwaFlightTaskNextWakeElapsedUs = nowUs + XWA_FLIGHT_FRAME_US;
+		return;
+	}
 	/* Modal continuations discard their elapsed host time; do not simulate on the completion frame. */
 	if (Flight_ContinueOptionsModal() || Hangar_ContinueOptionsModal()) {
 		g_xwaFlightTaskNextWakeElapsedUs = nowUs + XWA_FLIGHT_FRAME_US;
@@ -1665,6 +1672,11 @@ void XwaFlightTask_Tick(void) {
 			case XWA_FLIGHT_TASK_PHASE_FRAME:
 				if (g_flightPlayerCount == 1) {
 					XwaFlightTask_RunSinglePlayerFrame();
+					/* Alt+P requested by Flight_UpdateEntity takes ownership only
+					 * after the frame's simulation, audio and rendering finish. */
+					if (XwaFlightPauseTask_Tick()) {
+						g_xwaFlightTaskNextWakeElapsedUs = nowUs + XWA_FLIGHT_FRAME_US;
+					}
 					return;
 				}
 				XwaFlightTask_RunMultiplayerFrame();
@@ -1829,6 +1841,7 @@ void XwaFlightTask_Tick(void) {
 }
 
 int XwaFlightTask_Shutdown(void) {
+	XwaFlightPauseTask_Shutdown();
 	XwaModernFlightTiming_EndSession();
 	if (!g_xwaFlightTaskActive && !g_xwaFlightTaskComplete) {
 		return g_xwaFlightTaskResult;

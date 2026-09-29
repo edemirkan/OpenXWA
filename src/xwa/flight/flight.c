@@ -58,6 +58,7 @@
 #include "xwa_runtime/input/winmm_joystick_provider.h"
 #ifdef XWA_MODERN
 #include "xwa_runtime/input/mouse_flight.h"
+#include "xwa_runtime/runtime/flight_pause_task.h"
 #include "xwa_runtime/timing/modern_flight_timing.h"
 #endif
 
@@ -10355,52 +10356,6 @@ int Flight_ContinueOptionsModal(void) {
 	return 1;
 }
 
-static __inline void Flight_UpdateEntity_PauseUntilKey(unsigned int playerIdx) {
-	int16_t nextKey;
-
-	if (g_flightPlayerCount != 1) {
-		return;
-	}
-	if (g_filmPlaybackMode || g_filmRecording) {
-		g_actionKey = KEY_NONE;
-		if (g_filmRecording) {
-			msg_emitInFlightMessage(MSG_FILM_NO_PAUSE, (int)playerIdx);
-			fsfx_PlaySound(63, 0xffffu, playerIdx);
-		}
-		return;
-	}
-
-	g_inputTimestamp += Time_GetFrameDelta();
-	fsfx_PlaySound(68, 0xffffu, playerIdx);
-	msg_emitInFlightMessage(MSG_MISSION_PAUSED, (int)playerIdx);
-	if (g_useHardware3D) {
-		RenderScene_Initialize(1);
-		FlightText_FlushQueue();
-		RenderScene_DrawVisibleFaces();
-	} else {
-		FlightSw_SetRenderTarget(NULL, 0, 0, 0);
-		FlightSurface_Lock();
-		FlightText_SetClipRect(0, 0, g_screenWidth, g_screenHeight);
-		g_flightFillClipRectFn();
-		FlightSurface_Unlock();
-		Hud_BlitSoftwareHudTextPanes();
-	}
-	FlightDisplay_Flip();
-	Sound_StopAllInstances();
-	Music_PauseIfInitialized();
-	do {
-		nextKey = 0;
-		if (FlightInput_HasKeyReady()) {
-			nextKey = FlightInput_GetNextKey();
-		}
-	} while (!nextKey);
-	Music_ResumeIfInitialized();
-	Time_GetFrameDelta();
-	msg_emitInFlightMessage(MSG_MISSION_RESUMED, (int)playerIdx);
-	g_actionKey = KEY_NONE;
-	sub_4D4640();
-}
-
 static __inline int Flight_UpdateEntity_HandleLocalHotkeys(unsigned int playerIdx) {
 	if (playerIdx != (unsigned int)g_localPlayer || g_flightSimSideEffectsSuppressed) {
 		return 0;
@@ -10455,7 +10410,7 @@ static __inline int Flight_UpdateEntity_HandleLocalHotkeys(unsigned int playerId
 			g_unusedFlightAction140ToggleFlag = g_unusedFlightAction140ToggleFlag == 0;
 			break;
 		case 143:
-			Flight_UpdateEntity_PauseUntilKey(playerIdx);
+			XwaFlightPauseTask_Request(playerIdx);
 			break;
 		case 146:
 			g_flightSystemMessagesEnabled = g_flightSystemMessagesEnabled == 0;

@@ -12854,6 +12854,10 @@ void Hud_BlitSoftwareHudTextPanes(void) {
 
 // FUNCTION: XWA 0x47A5B0
 void Hud_DrawSystemTextPane(char* text, int16_t resourceTextId) {
+#ifdef XWA_MODERN
+	/* Pause draws its prompt after the regular HUD frame has completed. */
+	int paneUpdate = XwaSnapshotHud_BeginPaneUpdate(XWA_HUD_PANE_MESSAGE_SYSTEM);
+#endif
 	DebugPrintfChannel(0x20, "SYSTEM TEXT: %s\n", text);
 	HUD_PANE_PUSH(XWA_HUD_PANE_MESSAGE_SYSTEM, g_hudSystemMessagePaneX, g_hudSystemMessagePaneY,
 				  g_hudSystemMessagePaneSurfaceWidth, g_hudSystemMessagePaneSurfaceHeight);
@@ -12862,6 +12866,11 @@ void Hud_DrawSystemTextPane(char* text, int16_t resourceTextId) {
 							   g_hudSystemMessagePaneSurfaceHeight, text, resourceTextId);
 	FlightText_SetRenderOffset(0, 0);
 	HUD_PANE_POP();
+#ifdef XWA_MODERN
+	if (paneUpdate) {
+		XwaSnapshotHud_EndClassicFrame();
+	}
+#endif
 }
 
 // FUNCTION: XWA 0x47A610

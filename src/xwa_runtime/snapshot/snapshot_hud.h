@@ -11,6 +11,9 @@ extern "C" {
  * BeginClassicFrame and EndClassicFrame. */
 void XwaSnapshotHud_BeginClassicFrame(void);
 void XwaSnapshotHud_EndClassicFrame(void);
+/* Replaces a pane drawn outside a normal HUD frame, preserving the completed
+ * HUD. Returns nonzero when the caller must finish with EndClassicFrame. */
+int XwaSnapshotHud_BeginPaneUpdate(XwaHudPaneId pane);
 void XwaSnapshotHud_Reset(void);
 void XwaSnapshotHud_NoteReticleReady(int slot, int ready);
 void XwaSnapshotHud_NoteReticleInRange(int in_range);

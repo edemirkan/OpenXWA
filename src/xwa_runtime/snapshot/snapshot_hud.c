@@ -64,6 +64,32 @@ void XwaSnapshotHud_EndClassicFrame(void) {
 	g_hud_target_box_layer = XWA_HUD_TARGET_BOX_AFTER_FIXED;
 }
 
+int XwaSnapshotHud_BeginPaneUpdate(XwaHudPaneId pane) {
+	if (g_hud_capture.building_active || !g_hud_capture.completed.classic_frame_valid) {
+		return 0;
+	}
+	XwaHudState* h = &g_hud_capture.building;
+	*h = g_hud_capture.completed;
+	uint16_t count = 0;
+	for (uint16_t i = 0; i < h->glyph_count; ++i) {
+		if (h->glyphs[i].pane != pane) {
+			h->glyphs[count++] = h->glyphs[i];
+		}
+	}
+	h->glyph_count = count;
+	count = 0;
+	for (uint16_t i = 0; i < h->pane_count; ++i) {
+		if (h->panes[i].id != pane) {
+			h->panes[count++] = h->panes[i];
+		}
+	}
+	h->pane_count = count;
+	h->classic_frame_epoch = ++g_hud_capture.next_epoch;
+	g_hud_capture.building_active = 1;
+	g_hud_pane_scope_depth = 0;
+	return 1;
+}
+
 void XwaSnapshotHud_Reset(void) {
 	memset(&g_hud_capture, 0, sizeof g_hud_capture);
 	hud_initialize_reticle_indices(&g_hud_capture.completed.reticle);
