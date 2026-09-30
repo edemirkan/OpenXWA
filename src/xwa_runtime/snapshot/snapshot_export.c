@@ -62,16 +62,14 @@ uint8_t XwaSnapshotExport_FlightColorCodePaletteIndex(uint8_t color_code) {
 			   : color_code;
 }
 
-int XwaSnapshotExport_ComponentTargetGeometry(int object_type, int component, float out_local[3],
+int XwaSnapshotExport_ComponentTargetGeometry(int object_type, int component, float out_center_opt[3],
 											  int* out_extent) {
 	if (object_type <= 0 || object_type >= OBJ_Count || component < 0 || component >= XWA_SNAP_MAX_MESH_SLOTS)
 		return 0;
-	if (out_local) {
-		/* OPT-native coordinates. The flight model matrix maps this to the
-		 * same side/up/forward vector as the classic (x, z, -y) call. */
-		out_local[0] = (float)ModelMesh_GetCenterX(object_type, component);
-		out_local[1] = (float)ModelMesh_GetCenterY(object_type, component);
-		out_local[2] = (float)ModelMesh_GetCenterZ(object_type, component);
+	if (out_center_opt) {
+		out_center_opt[0] = (float)ModelMesh_GetCenterX(object_type, component);
+		out_center_opt[1] = (float)ModelMesh_GetCenterY(object_type, component);
+		out_center_opt[2] = (float)ModelMesh_GetCenterZ(object_type, component);
 	}
 	if (out_extent)
 		*out_extent = ModelMesh_GetComponentMaxExtent((uint16_t)object_type, (uint16_t)component) / 3;

@@ -911,7 +911,7 @@ typedef struct XwaHudCrt {
 	uint16_t classic_viewport_h;
 	uint16_t proj_aspect_y_q16;
 	int32_t proj_scale;
-	int32_t component_focus[3];
+	int32_t component_focus[3]; /* model-space target/fallback center in native OPT units */
 	/* Target-to-camera fit distance before projection through the
 	 * truncated Q15 camera row. */
 	int32_t camera_distance;
@@ -1197,7 +1197,8 @@ void XwaSnapshot_NoteGlowMarkMesh(const void* patch, unsigned int mesh_index);
 void XwaSnapshotExport_ColorToRgba(uint32_t color, uint8_t out_rgba[4]);
 uint32_t XwaSnapshotExport_FlightPaletteColor(uint16_t color_index);
 uint8_t XwaSnapshotExport_FlightColorCodePaletteIndex(uint8_t color_code);
-int XwaSnapshotExport_ComponentTargetGeometry(int object_type, int component, float out_local[3],
+/* Component center in model-space native OPT units; extent in native XWA units. */
+int XwaSnapshotExport_ComponentTargetGeometry(int object_type, int component, float out_center_opt[3],
 											  int* out_extent);
 
 /* Engine model name for an ObjectTypeId — the

@@ -745,16 +745,10 @@ void XwaRemasterHudCmd_Prepare(AeronCommandBuffer* cmd, const XwaSnapshot* snaps
 	s_cmd.prepared.rect_w_ref = rect_w_ref;
 	s_cmd.prepared.rect_h_ref = rect_h_ref;
 	if (s_cmd.prepared.valid && crt->component_marker_visible && target_transform[15] != 0.0f) {
-		const float focus[3] = { (float)crt->component_focus[0], (float)crt->component_focus[1],
-								 (float)crt->component_focus[2] };
-		const float eye[3] = {
-			target_transform[0] * focus[0] + target_transform[1] * focus[1] + target_transform[2] * focus[2] +
-				target_transform[3],
-			target_transform[4] * focus[0] + target_transform[5] * focus[1] + target_transform[6] * focus[2] +
-				target_transform[7],
-			target_transform[8] * focus[0] + target_transform[9] * focus[1] +
-				target_transform[10] * focus[2] + target_transform[11],
-		};
+		const float focus_opt[3] = { (float)crt->component_focus[0], (float)crt->component_focus[1],
+									 (float)crt->component_focus[2] };
+		float eye[3];
+		XwaRemasterFlight_TransformOptPoint(target_transform, focus_opt, eye);
 		if (eye[2] > 0.0f) {
 			const float viewport_w = crt->classic_viewport_w ? (float)crt->classic_viewport_w : 176.0f;
 			const float viewport_h = crt->classic_viewport_h ? (float)crt->classic_viewport_h : 144.0f;

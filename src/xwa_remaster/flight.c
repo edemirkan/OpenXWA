@@ -1679,7 +1679,7 @@ static void fl_object_world(const float cur[3][3], float out[9]) {
 	}
 }
 
-/* Model matrix from a model->space basis (rows) + translation, the
+/* Model metres -> scene units from a model->space basis + native-unit translation, the
  * transpose consumption the model preview validated (Math3D_RotateVec3
  * is column-major over the stored rows). */
 static void fl_model_matrix(const float basis[9], const float delta[3], float m[16]) {
@@ -1700,6 +1700,19 @@ static void fl_model_matrix(const float basis[9], const float delta[3], float m[
 	m[13] = 0.0f;
 	m[14] = 0.0f;
 	m[15] = 1.0f;
+}
+
+void XwaRemasterFlight_TransformOptPoint(const float model_meters_to_scene[16], const float point_opt[3],
+										 float out_scene[3]) {
+	const float point_meters[3] = {
+		point_opt[0] * AERON_OPT_METERS_PER_UNIT,
+		point_opt[1] * AERON_OPT_METERS_PER_UNIT,
+		point_opt[2] * AERON_OPT_METERS_PER_UNIT,
+	};
+	for (int row = 0; row < 3; row++) {
+		const float* m = &model_meters_to_scene[row * 4];
+		out_scene[row] = m[0] * point_meters[0] + m[1] * point_meters[1] + m[2] * point_meters[2] + m[3];
+	}
 }
 
 static int fl_is_death_star_beam(const XwaSnapshot* snap, const XwaFlightObject* object) {

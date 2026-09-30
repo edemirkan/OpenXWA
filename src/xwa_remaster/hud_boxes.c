@@ -21,12 +21,6 @@ static const XwaFlightObject* box_find_object(const XwaSnapshot* snapshot, const
 	return NULL;
 }
 
-static void box_transform_point(const float m[16], const float p[3], float out[3]) {
-	out[0] = m[0] * p[0] + m[1] * p[1] + m[2] * p[2] + m[3];
-	out[1] = m[4] * p[0] + m[5] * p[1] + m[6] * p[2] + m[7];
-	out[2] = m[8] * p[0] + m[9] * p[1] + m[10] * p[2] + m[11];
-}
-
 static void box_output_transform(const XwaHudLayoutProfile* profile, int target_w, int target_h, int* out_x,
 								 int* out_y, float* out_scale) {
 	XwaRemasterHudLayout_OutputTransform(profile, target_w, target_h, out_x, out_y, out_scale);
@@ -89,14 +83,14 @@ void XwaRemasterHudBoxes_Build(const XwaSnapshot* snapshot, XwaHudProfileIndex p
 			continue;
 		float local_point[3];
 		if (source->component != 0xffffu) {
-			float local[3];
-			if (!XwaSnapshotExport_ComponentTargetGeometry(object->object_type, source->component, local,
+			float center_opt[3];
+			if (!XwaSnapshotExport_ComponentTargetGeometry(object->object_type, source->component, center_opt,
 														   NULL))
 				continue;
 			float model[16];
 			if (!XwaRemasterFlight_ObjectModelMatrixAtOrigin(object, flight_view->origin_world, model))
 				continue;
-			box_transform_point(model, local, local_point);
+			XwaRemasterFlight_TransformOptPoint(model, center_opt, local_point);
 		}
 		float center_x, center_y, depth;
 		if (source->component != 0xffffu) {

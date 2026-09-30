@@ -206,14 +206,22 @@ int XwaRemasterFlight_ProjectView(const XwaRemasterFlightView* view, const float
  * instance extent itself remains the engine's full 32-bit value. */
 uint16_t XwaRemasterFlight_ClassicBillboardBaseSize(int32_t instance_extent, int object_type, int max_bounds);
 
-/* Pure snapshot-pose helper shared by scene instances and world-linked HUD
- * elements. Produces the exact OPT-native model-to-render-local matrix used by
- * the modern flight renderer. */
+/* Snapshot-pose helpers shared by scene instances and world-linked HUD elements.
+ * Matrices accept model positions in metres with OPT axes and produce render-local
+ * positions in native XWA units. Origin and camera delta also use native XWA units.
+ * AtOrigin includes object translation; ForCameraDelta returns only the basis
+ * and metre-to-native scale, with optional projectile roll alignment. */
 int XwaRemasterFlight_ObjectModelMatrixAtOrigin(const XwaFlightObject* object, const int32_t origin_world[3],
 												float out[16]);
 int XwaRemasterFlight_ObjectModelMatrixForCameraDelta(const XwaFlightObject* object,
 													  const float camera_minus_object[3], int roll_align,
 													  float out[16]);
+
+/* Transform a model-space point in native OPT units through a mesh instance's
+ * row-major affine matrix (model metres -> scene units). Works with both the
+ * flight render-local and PiP eye-local transforms; translation is not rescaled. */
+void XwaRemasterFlight_TransformOptPoint(const float model_meters_to_scene[16], const float point_opt[3],
+										 float out_scene[3]);
 
 /* One-shot process assets prepared by the first flight loading snapshot.
  * PrepareProcessAssets requires no open GPU render pass. */
