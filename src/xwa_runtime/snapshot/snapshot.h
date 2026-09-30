@@ -43,6 +43,8 @@ typedef enum XwaEmitTarget {
 	XWA_EMIT_TARGET_MAIN = 0,      /* frontend back buffer */
 	XWA_EMIT_TARGET_EXTERNAL = 1,  /* external/scratch surface (brief map etc.) */
 	XWA_EMIT_TARGET_OFFSCREEN = 2, /* offscreen (persistent screen) surface */
+	XWA_EMIT_TARGET_CURSOR,
+	XWA_EMIT_TARGET_CURSOR_LABEL,
 } XwaEmitTarget;
 
 /* Surface-level events, z-ordered with the draw records so the
@@ -78,6 +80,9 @@ typedef enum XwaSurfaceEventKind {
 	 * the engine 16bpp fill color. */
 	XWA_SURFACE_EVENT_BACKBUFFER_CLEAR = 7,
 	XWA_SURFACE_EVENT_OFFSCREEN_CLEAR = 8,
+	/* Cursor draw scopes. Rect is the cursor origin/size or label box. */
+	XWA_SURFACE_EVENT_CURSOR,
+	XWA_SURFACE_EVENT_CURSOR_LABEL,
 } XwaSurfaceEventKind;
 
 typedef struct XwaSurfaceEvent {
@@ -1133,6 +1138,10 @@ void XwaSnapshot_SetSceneKind(XwaSceneKind kind);
 
 /* FrontendDraw_Begin/EndExternalSurface routing tag. */
 void XwaSnapshot_SetEmitTarget(XwaEmitTarget target);
+/* Separate presentation layers; surface locks inside these scopes keep their normal target. */
+void XwaSnapshot_BeginCursor(void);
+void XwaSnapshot_BeginCursorLabel(int left, int top, int right, int bottom);
+void XwaSnapshot_EndCursor(void);
 
 /* Sprite family. `src` may be NULL (whole image); `frame` is the
  * resource's currentFrame at draw time (animation cel); img_w/img_h

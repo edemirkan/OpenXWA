@@ -9,8 +9,8 @@
  */
 
 #include "aeron/render.h"
-#include "xwa_runtime/snapshot/snapshot.h"
 #include "xwa_remaster/assets.h"
+#include "xwa_runtime/snapshot/snapshot.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,6 +23,8 @@ extern "C" {
 AeronTexture* XwaRemasterFrontend_Render(AeronCommandBuffer* cmd, const XwaSnapshot* snap,
 										 XwaRemasterAssets* assets, int target_width, int target_height);
 
+/* Submit retained cursor artwork at the current host-frame pointer position. */
+void XwaRemasterFrontend_PresentCursor(float opacity, int split_view);
 void XwaRemasterFrontend_Shutdown(void);
 
 #ifdef __cplusplus

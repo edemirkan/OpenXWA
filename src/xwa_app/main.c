@@ -20,6 +20,13 @@ enum {
 	XWA_SETUP_QUIT = 3,
 };
 
+static uint64_t presentation_interval_us(void) {
+	double rate = Aeron_PresentationRate();
+	if (!(rate >= 1.0 && rate <= 1000.0))
+		rate = 60.0;
+	return (uint64_t)(1000000.0 / rate + 0.5);
+}
+
 static void apply_modern_video_options(const XwaModernVideoOptions* options) {
 	if (!options) {
 		return;
@@ -464,7 +471,13 @@ int main(int argc, char** argv) {
 				Aeron_RequestFatalRendererError("frame presentation");
 				break;
 			}
-			Aeron_WaitForNextFrame(XwaPort_NextWakeDelayUs());
+			uint64_t wake_us = presentation_interval_us();
+			if (!paused) {
+				const uint64_t task_us = XwaPort_NextWakeDelayUs();
+				if (task_us < wake_us)
+					wake_us = task_us;
+			}
+			Aeron_WaitForNextFrame(wake_us);
 		}
 	}
 

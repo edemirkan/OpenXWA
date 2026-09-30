@@ -9,6 +9,9 @@
 #include "xwa/frontend/frontend_resources.h"
 #include "xwa/frontend/frontend_text.h"
 #include <string.h>
+#ifdef XWA_MODERN
+#include "xwa_runtime/snapshot/snapshot.h"
+#endif
 
 enum {
 	FRONTEND_CURSOR_HOTSPOT_OFFSET = 5,
@@ -227,6 +230,9 @@ void FrontendCursor_Draw(void) {
 		return;
 	}
 
+#ifdef XWA_MODERN
+	XwaSnapshot_BeginCursor();
+#endif
 	cursorW = g_cursorWidth;
 	cursorH = g_cursorHeight;
 	rowStride = g_cursorWidth;
@@ -381,6 +387,9 @@ void FrontendCursor_Draw(void) {
 		}
 
 		FrontendDraw_RectAssign(&rect, labelX, labelY, labelX + labelWidth + 5, labelY + 15);
+#ifdef XWA_MODERN
+		XwaSnapshot_BeginCursorLabel(rect.left, rect.top, rect.right, rect.bottom);
+#endif
 		borderColor = FrontendDisplay_PackRGB(0x60, 0x60, 0x60);
 		FrontendDraw_Rect(&rect, 0, 0, 16, 1);
 		FrontendDraw_RectOutline(&rect, 0, 0, borderColor);
@@ -395,6 +404,9 @@ void FrontendCursor_Draw(void) {
 		FrontendText_SetGlyphGradientBg(savedGradientBg);
 	}
 
+#ifdef XWA_MODERN
+	XwaSnapshot_EndCursor();
+#endif
 	FrontendDisplay_UnlockBackBuffer();
 	g_cursorPrevDrawWidth = clippedW;
 	g_cursorPrevDrawX = g_mouseX;

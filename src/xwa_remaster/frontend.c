@@ -2,17 +2,16 @@
  * XWA remaster driver — frontend 2D reconstruction.
  *
  * MODEL: mirror the engine's surface structure instead of its pixels
- * (the TIE incremental model, extended). Two RTs:
+ * (the TIE incremental model, extended). Two main RTs:
  *
  *   screen_rt : mirrors the persistent offscreen surface. Records
  *               emitted while the offscreen surface was locked land
  *               here and persist across ticks. Cleared on scene
  *               transitions; rooms repaint fully through records.
- *   output_rt : the per-tick visible frame. Rebuilt every tick as
- *               screen_rt + this tick's back-buffer records in z
- *               order — so transients (cursor, hover label, animated
- *               cels) never accumulate: their erasure is structural,
- *               mirroring the engine's per-present offscreen restore.
+ *   output_rt : the visible frame, retained on idle host ticks. Frontend
+ *               updates rebuild it from screen_rt + back-buffer records in
+ *               z order, mirroring the engine's per-present offscreen restore.
+ * Cursor and label draws use separate small targets composed at host rate.
  *
  * Surface events captured from the engine's own copy operations are
  * replayed in z order between record segments:
@@ -47,16 +46,25 @@
 #include <string.h>
 
 #define RM_SAVE_STACK_CAP 8
-#define RM_RETIRED_TARGET_CAP (3 + RM_SAVE_STACK_CAP)
+#define RM_RETIRED_TARGET_CAP (5 + RM_SAVE_STACK_CAP)
 
 typedef struct RmSaveSlot {
 	AeronRenderTarget* rt;
 	int16_t left, top, right, bottom;
 } RmSaveSlot;
 
+typedef struct RmCursorLayer {
+	AeronRenderTarget* rt;
+	AeronRectI bounds;
+	AeronRectI clip;
+	int visible;
+} RmCursorLayer;
+
 typedef struct RmState {
 	AeronRenderTarget* screen_rt;
 	AeronRenderTarget* output_rt;
+	RmCursorLayer cursor, cursor_label;
+	AeronRectI cursor_pose;
 	/* External (scratch-surface) mirror: EXTERNAL-tagged records draw
 	 * here; COMPOSITE surface events copy from it (briefing wireframe
 	 * hologram). Persistent across ticks like the classic scratch. */
@@ -86,6 +94,9 @@ typedef struct RmState {
 } RmState;
 
 static RmState g;
+
+static AeronRenderTarget* rm_create_target(int width, int height, const char* debug_name);
+static void rm_retire_target(AeronRenderTarget* target);
 
 /* ---- record translation --------------------------------------------- */
 
@@ -538,6 +549,117 @@ static void rm_prepare_model_previews(AeronCommandBuffer* cmd, const XwaSnapshot
 	}
 }
 
+/* Cursor pixels belong to the held presentation, independently of source assets.
+ * Reuse the ordinary translators in local coordinates; movement only submits layers. */
+static int rm_render_cursor_layer(AeronCommandBuffer* cmd, const XwaSnapshot* snap,
+								  const XwaSurfaceEvent* begin, uint32_t end, XwaEmitTarget target,
+								  RmCursorLayer* layer) {
+	layer->visible = 0;
+	if (!begin)
+		return 1;
+	AeronRectI bounds = { begin->left, begin->top, begin->right - begin->left + 1,
+						  begin->bottom - begin->top + 1 };
+	layer->clip = (AeronRectI) { 0, 0, 640, 480 };
+	/* Atlas anchors are already included in the captured sprite destination. */
+	for (uint32_t i = 0; i < snap->draw_2d_count; i++) {
+		const XwaDraw2D* d = &snap->draws_2d[i];
+		if (d->target == target && d->z_order > begin->z_order && d->z_order < end) {
+			bounds = (AeronRectI) { d->dst_x, d->dst_y, d->img_w, d->img_h };
+			layer->clip = (AeronRectI) { d->clip_left, d->clip_top, d->clip_right - d->clip_left + 1,
+										 d->clip_bottom - d->clip_top + 1 };
+			break;
+		}
+	}
+	const int width = (int)ceilf(bounds.width * rm_scale_x());
+	const int height = (int)ceilf(bounds.height * rm_scale_y());
+	if (width <= 0 || height <= 0)
+		return 1;
+	AeronTexture* texture = layer->rt ? Aeron_RenderTargetGetTexture(layer->rt) : NULL;
+	if (!texture || Aeron_TextureGetWidth(texture) != width || Aeron_TextureGetHeight(texture) != height) {
+		AeronRenderTarget* rt = rm_create_target(width, height, "xwa.frontend.cursor");
+		if (!rt)
+			return 0;
+		rm_retire_target(layer->rt);
+		layer->rt = rt;
+	}
+	const float clear[4] = { 0, 0, 0, 0 };
+	AeronDrawList_Begin(g.list, layer->rt, width, height, AERON_DRAWLIST2D_CLEAR, clear);
+	for (uint32_t i = 0; i < snap->draw_2d_count; i++) {
+		const XwaDraw2D* record = &snap->draws_2d[i];
+		if (record->target != target || record->z_order <= begin->z_order || record->z_order >= end)
+			continue;
+		XwaDraw2D d = *record;
+		d.dst_x -= bounds.x;
+		d.dst_y -= bounds.y;
+		/* Cache the full artwork, including portions clipped at the old pointer position. */
+		d.clip_left = d.clip_top = 0;
+		d.clip_right = 639;
+		d.clip_bottom = 479;
+		rm_add_draw(g.list, &d);
+	}
+	/* Cursor labels draw their box first, then text; the bitmap fallback is all paint. */
+	for (uint32_t i = 0; i < snap->paint_cmd_count; i++) {
+		const XwaPaintCmd* record = &snap->paint_cmds[i];
+		if (record->target != target || record->z_order <= begin->z_order || record->z_order >= end)
+			continue;
+		XwaPaintCmd p = *record;
+		p.x0 -= bounds.x;
+		p.x1 -= bounds.x;
+		p.y0 -= bounds.y;
+		p.y1 -= bounds.y;
+		p.clip_left = p.clip_top = 0;
+		p.clip_right = 639;
+		p.clip_bottom = 479;
+		rm_add_paint(g.list, &p);
+	}
+	for (uint32_t i = 0; i < snap->glyph_count; i++) {
+		const XwaGlyph2D* record = &snap->glyphs[i];
+		if (record->target != target || record->z_order <= begin->z_order || record->z_order >= end)
+			continue;
+		XwaGlyph2D glyph = *record;
+		glyph.x -= bounds.x;
+		glyph.y -= bounds.y;
+		glyph.clip_left -= bounds.x;
+		glyph.clip_right -= bounds.x;
+		glyph.clip_top -= bounds.y;
+		glyph.clip_bottom -= bounds.y;
+		/* Screen-space clips can start before this small texture. GPU scissors
+		 * must stay inside the target after translating to label coordinates. */
+		if (glyph.clip_left < 0)
+			glyph.clip_left = 0;
+		if (glyph.clip_top < 0)
+			glyph.clip_top = 0;
+		if (glyph.clip_right >= bounds.width)
+			glyph.clip_right = bounds.width - 1;
+		if (glyph.clip_bottom >= bounds.height)
+			glyph.clip_bottom = bounds.height - 1;
+		if (glyph.clip_left > glyph.clip_right || glyph.clip_top > glyph.clip_bottom)
+			continue;
+		rm_add_glyph(g.list, &glyph);
+	}
+	AeronDrawList_Render(g.list, cmd);
+	layer->bounds = bounds;
+	layer->visible = 1;
+	return 1;
+}
+
+static void rm_present_cursor(AeronCommandBuffer* cmd, const XwaSnapshot* snap, const XwaSurfaceEvent* cursor,
+							  const XwaSurfaceEvent* label, uint32_t end) {
+	/* Modal cleanup can hide the cursor after its draw was captured. */
+	if (!snap->cursor_visible) {
+		g.cursor.visible = g.cursor_label.visible = 0;
+		return;
+	}
+	if (!rm_render_cursor_layer(cmd, snap, cursor, end, XWA_EMIT_TARGET_CURSOR, &g.cursor) ||
+		!rm_render_cursor_layer(cmd, snap, label, end, XWA_EMIT_TARGET_CURSOR_LABEL, &g.cursor_label)) {
+		Aeron_CommandBufferSetFailure(cmd, "Frontend cursor target creation failed");
+		return;
+	}
+	if (cursor)
+		g.cursor_pose = (AeronRectI) { cursor->left, cursor->top, cursor->right - cursor->left + 1,
+									   cursor->bottom - cursor->top + 1 };
+}
+
 static void rm_reconstruct(AeronCommandBuffer* cmd, const XwaSnapshot* snap) {
 	rm_prepare_model_previews(cmd, snap);
 	if (g.screen_needs_clear) {
@@ -558,17 +680,19 @@ static void rm_reconstruct(AeronCommandBuffer* cmd, const XwaSnapshot* snap) {
 		}
 	}
 
-	/* Frame starts from the persistent screen. */
+	/* Only frontend updates reach reconstruction; idle host ticks retain output. */
 	rm_blit_rt(cmd, g.output_rt, g.screen_rt);
+
+	const XwaSurfaceEvent* cursor = NULL;
+	const XwaSurfaceEvent* cursor_label = NULL;
 
 	const int restore_on = snap->offscreen_restore_enabled != 0;
 
 	uint32_t di = 0, pi = 0, gi = 0, ei = 0, vi = 0;
-	int seg_open = 0;     /* g.list currently Begin'd on output_rt */
-	int present_seen = 0; /* PRESENT event passed — restores after
-						   * it clean the back buffer for the NEXT
-						   * frame; the tick-start output<-screen
-						   * copy already models that. */
+	int seg_open = 0; /* g.list currently Begin'd on output_rt */
+	/* Post-present restores/clears prepare the next frame. Keep this output
+	 * visible until the next frontend update rebuilds it from screen_rt. */
+	int present_seen = 0;
 
 	const uint32_t preview_count = snap->model_preview_count < XWA_SNAP_MAX_MODEL_PREVIEWS
 									   ? snap->model_preview_count
@@ -634,12 +758,20 @@ static void rm_reconstruct(AeronCommandBuffer* cmd, const XwaSnapshot* snap) {
 			}
 			switch ((XwaSurfaceEventKind)e->kind) {
 				case XWA_SURFACE_EVENT_PRESENT:
+					rm_present_cursor(cmd, snap, cursor, cursor_label, e->z_order);
 					present_seen = 1;
+					cursor = cursor_label = NULL;
+					break;
+				case XWA_SURFACE_EVENT_CURSOR:
+					cursor = e;
+					cursor_label = NULL;
+					break;
+				case XWA_SURFACE_EVENT_CURSOR_LABEL:
+					cursor_label = e;
 					break;
 				case XWA_SURFACE_EVENT_OFFSCREEN_RESTORE:
-					if (!present_seen) { /* mid-tick restore-then-redraw */
+					if (!present_seen)
 						rm_blit_rt(cmd, g.output_rt, g.screen_rt);
-					}
 					break;
 				case XWA_SURFACE_EVENT_BACKBUFFER_SAVE:
 					rm_blit_rt(cmd, g.screen_rt, g.output_rt);
@@ -664,13 +796,8 @@ static void rm_reconstruct(AeronCommandBuffer* cmd, const XwaSnapshot* snap) {
 					rm_external_composite(cmd, e, restore_on);
 					break;
 				case XWA_SURFACE_EVENT_BACKBUFFER_CLEAR:
-					/* Post-present clears clean the NEXT frame's buffer —
-					 * the tick-start rebuild models that. Restore off:
-					 * the back buffer is the persistent surface, so the
-					 * clear persists (MAIN record rule). */
-					if (!present_seen) {
+					if (!present_seen)
 						rm_surface_clear(cmd, g.output_rt, (uint32_t)(uint16_t)e->aux0);
-					}
 					if (!restore_on) {
 						rm_surface_clear(cmd, g.screen_rt, (uint32_t)(uint16_t)e->aux0);
 					}
@@ -692,6 +819,15 @@ static void rm_reconstruct(AeronCommandBuffer* cmd, const XwaSnapshot* snap) {
 			target = snap->paint_cmds[pi].target;
 		} else {
 			target = snap->glyphs[gi].target;
+		}
+		if (target == XWA_EMIT_TARGET_CURSOR || target == XWA_EMIT_TARGET_CURSOR_LABEL) {
+			if (dz <= pz && dz <= gz)
+				di++;
+			else if (pz <= gz)
+				pi++;
+			else
+				gi++;
+			continue;
 		}
 		if (target == XWA_EMIT_TARGET_EXTERNAL) {
 			/* External (scratch-surface) record: draws into the
@@ -906,6 +1042,8 @@ void XwaRemasterFrontend_Shutdown(void) {
 	if (g.output_rt) {
 		Aeron_DestroyRenderTarget(g.output_rt);
 	}
+	Aeron_DestroyRenderTarget(g.cursor.rt);
+	Aeron_DestroyRenderTarget(g.cursor_label.rt);
 	if (g.external_rt) {
 		Aeron_DestroyRenderTarget(g.external_rt);
 	}
@@ -916,7 +1054,10 @@ void XwaRemasterFrontend_Shutdown(void) {
 
 AeronTexture* XwaRemasterFrontend_Render(AeronCommandBuffer* cmd, const XwaSnapshot* snap,
 										 XwaRemasterAssets* assets, int target_width, int target_height) {
-	if (!cmd || !snap || !rm_ensure(cmd, target_width, target_height)) {
+	if (!cmd || !snap)
+		return NULL;
+	if (!rm_ensure(cmd, target_width, target_height)) {
+		Aeron_CommandBufferSetFailure(cmd, "Frontend target creation failed");
 		return NULL;
 	}
 	g.assets = assets; /* borrowed for the call (rm_* helpers read it) */
@@ -937,4 +1078,72 @@ AeronTexture* XwaRemasterFrontend_Render(AeronCommandBuffer* cmd, const XwaSnaps
 	}
 	rm_reconstruct(cmd, snap);
 	return Aeron_RenderTargetGetTexture(g.output_rt);
+}
+
+static void rm_submit_cursor_layer(const RmCursorLayer* cursor, int x, int y, float opacity, int split_view) {
+	if (!cursor->visible || !cursor->rt)
+		return;
+	const XwaPresentationRect safe = XwaPresentation_ClassicSafeFrame();
+	const int left = safe.x + rm_edge_for(x, safe.width, XWA_CLASSIC_WIDTH);
+	const int top = safe.y + rm_edge_for(y, safe.height, XWA_CLASSIC_HEIGHT);
+	/* Keep the cached artwork's size independent of position rounding. */
+	AeronTextureLayerDesc layer = {
+		.texture = Aeron_RenderTargetGetTexture(cursor->rt),
+		.logical_rect = { left, top, rm_edge_for(cursor->bounds.width, safe.width, XWA_CLASSIC_WIDTH),
+						  rm_edge_for(cursor->bounds.height, safe.height, XWA_CLASSIC_HEIGHT) },
+		.blend_mode = AERON_LAYER_BLEND_PREMULTIPLIED,
+		.color_space = AERON_COLOR_SPACE_LINEAR_DISPLAY,
+		.tint_enabled = 1,
+		.tint_rgba = { opacity, opacity, opacity, opacity },
+		.scissor = { safe.x, safe.y, safe.width, safe.height },
+	};
+	if (split_view) {
+		layer.scissor.x += safe.width / 2;
+		layer.scissor.width = safe.width / 2;
+	}
+	const int clip_left = safe.x + rm_edge_for(cursor->clip.x, safe.width, XWA_CLASSIC_WIDTH);
+	const int clip_top = safe.y + rm_edge_for(cursor->clip.y, safe.height, XWA_CLASSIC_HEIGHT);
+	const int clip_right =
+		safe.x + rm_edge_for(cursor->clip.x + cursor->clip.width, safe.width, XWA_CLASSIC_WIDTH);
+	const int clip_bottom =
+		safe.y + rm_edge_for(cursor->clip.y + cursor->clip.height, safe.height, XWA_CLASSIC_HEIGHT);
+	const int right = clip_right < layer.scissor.x + layer.scissor.width
+						  ? clip_right
+						  : layer.scissor.x + layer.scissor.width;
+	const int bottom = clip_bottom < layer.scissor.y + layer.scissor.height
+						   ? clip_bottom
+						   : layer.scissor.y + layer.scissor.height;
+	if (clip_left > layer.scissor.x)
+		layer.scissor.x = clip_left;
+	if (clip_top > layer.scissor.y)
+		layer.scissor.y = clip_top;
+	layer.scissor.width = right - layer.scissor.x;
+	layer.scissor.height = bottom - layer.scissor.y;
+	if (layer.scissor.width <= 0 || layer.scissor.height <= 0)
+		return;
+	if (!Aeron_SubmitTextureLayer(&layer))
+		Aeron_RequestFatalRendererError("frontend cursor presentation");
+}
+
+void XwaRemasterFrontend_PresentCursor(float opacity, int split_view) {
+	const AeronInputSnapshot* input = Aeron_InputSnapshot();
+	if (!g.cursor.visible || opacity <= 0 || !input || !input->has_focus || Aeron_RelativeMouseMode() ||
+		Aeron_DebugUiVisible())
+		return;
+	int x = g.cursor_pose.x, y = g.cursor_pose.y;
+	/* Keep the remaster and baked classic cursors aligned during the crossfade. */
+	if (opacity >= 1.0f)
+		XwaPresentation_ToClassic(input->mouse.x, input->mouse.y, &x, &y);
+	rm_submit_cursor_layer(&g.cursor, x + g.cursor.bounds.x - g.cursor_pose.x,
+						   y + g.cursor.bounds.y - g.cursor_pose.y, opacity, split_view);
+	if (g.cursor_label.visible) {
+		int label_x = x + g.cursor_pose.width;
+		int label_y = y + g.cursor_pose.height;
+		/* FrontendCursor_Draw's original inclusive box and edge placement. */
+		if (label_x + g.cursor_label.bounds.width - 1 >= 640)
+			label_x = 640 - g.cursor_label.bounds.width;
+		if (label_y + 17 >= 480)
+			label_y = 462;
+		rm_submit_cursor_layer(&g.cursor_label, label_x, label_y, opacity, split_view);
+	}
 }

@@ -45,6 +45,11 @@ static int g_previous_slot = -1;
 static uint64_t g_tick_index;
 static uint32_t g_z_counter;
 static XwaEmitTarget g_emit_target = XWA_EMIT_TARGET_MAIN;
+static XwaEmitTarget g_cursor_target = XWA_EMIT_TARGET_MAIN;
+
+static XwaEmitTarget snapshot_emit_target(void) {
+	return g_cursor_target != XWA_EMIT_TARGET_MAIN ? g_cursor_target : g_emit_target;
+}
 static XwaSceneKind g_scene_kind = XWA_SCENE_NONE;
 static uint32_t g_hyperspace_visible_streak_count;
 static uint8_t g_hyperspace_visible_streak_valid;
@@ -107,6 +112,7 @@ void XwaSnapshot_BeginTick(void) {
 	s->dropped_records = 0;
 	g_z_counter = 0;
 	g_emit_target = XWA_EMIT_TARGET_MAIN;
+	g_cursor_target = XWA_EMIT_TARGET_MAIN;
 }
 
 void XwaSnapshot_NoteHyperspaceVisibleStreakCount(uint32_t count) {
@@ -444,6 +450,38 @@ void XwaSnapshot_SetSceneKind(XwaSceneKind kind) { g_scene_kind = kind; }
 
 void XwaSnapshot_SetEmitTarget(XwaEmitTarget target) { g_emit_target = target; }
 
+void XwaSnapshot_BeginCursor(void) {
+	g_cursor_target = XWA_EMIT_TARGET_CURSOR;
+	XwaSnapshot_EmitSurfaceEvent(XWA_SURFACE_EVENT_CURSOR, g_mouseX, g_mouseY, g_mouseX + g_cursorWidth - 1,
+								 g_mouseY + g_cursorHeight - 1);
+	/* The built-in mask writes pixels directly instead of using a sprite blitter. */
+	if (!g_cursorSpriteName[0] && g_cursorMaskPixels) {
+		for (int y = 0; y < g_cursorHeight; y++) {
+			for (int x = 0; x < g_cursorWidth; x++) {
+				const unsigned mask = g_cursorMaskPixels[y * g_cursorWidth + x];
+				if ((g_displayBpp == 8 && mask) || (g_displayBpp == 16 && (mask == 1 || mask == 255))) {
+					uint32_t color = mask == 1 ? 0x001f : 0xffff;
+					if (g_displayBpp == 8) {
+						const FrontendPaletteEntry* entry = &g_displayPalette[mask];
+						color = ((uint32_t)(entry->peRed >> 3) << (g_pixelFormat555 ? 10 : 11)) |
+								((uint32_t)(entry->peGreen >> (g_pixelFormat555 ? 3 : 2)) << 5) |
+								(entry->peBlue >> 3);
+					}
+					XwaSnapshot_EmitPaint(XWA_PAINT_PIXEL, g_mouseX + x, g_mouseY + y, g_mouseX + x,
+										  g_mouseY + y, 0, 0, color);
+				}
+			}
+		}
+	}
+}
+
+void XwaSnapshot_BeginCursorLabel(int left, int top, int right, int bottom) {
+	g_cursor_target = XWA_EMIT_TARGET_CURSOR_LABEL;
+	XwaSnapshot_EmitSurfaceEvent(XWA_SURFACE_EVENT_CURSOR_LABEL, left, top, right, bottom);
+}
+
+void XwaSnapshot_EndCursor(void) { g_cursor_target = XWA_EMIT_TARGET_MAIN; }
+
 /* ---- name -> source-file bindings -----------------------------------
  * Session-persistent side table (not per-slot): registration is rare
  * (room transitions), lookups happen per sprite emit. Names are reused
@@ -744,7 +782,7 @@ void XwaSnapshot_EmitSprite(XwaDraw2DKind kind, const char* name, int frame, con
 	memset(d, 0, sizeof *d);
 	d->z_order = g_z_counter++;
 	d->kind = (uint8_t)kind;
-	d->target = (uint8_t)g_emit_target;
+	d->target = (uint8_t)snapshot_emit_target();
 	if (name) {
 		size_t n = strlen(name);
 		if (n >= sizeof d->name) {
@@ -788,7 +826,7 @@ void XwaSnapshot_EmitAtlasSprite(int group_id, int index, int x, int y, int img_
 	memset(d, 0, sizeof *d);
 	d->z_order = g_z_counter++;
 	d->kind = XWA_DRAW2D_ATLAS_SPRITE;
-	d->target = (uint8_t)g_emit_target;
+	d->target = (uint8_t)snapshot_emit_target();
 	d->atlas_group = (int16_t)group_id;
 	d->atlas_index = (int16_t)index;
 	d->img_w = (int16_t)img_w;
@@ -809,7 +847,7 @@ void XwaSnapshot_EmitPaint(XwaPaintKind kind, int x0, int y0, int x1, int y1, in
 	memset(p, 0, sizeof *p);
 	p->z_order = g_z_counter++;
 	p->kind = (uint8_t)kind;
-	p->target = (uint8_t)g_emit_target;
+	p->target = (uint8_t)snapshot_emit_target();
 	p->x0 = (int16_t)x0;
 	p->y0 = (int16_t)y0;
 	p->x1 = (int16_t)x1;
@@ -1578,7 +1616,7 @@ void XwaSnapshot_EmitModelPreview(const XwaModelPreview* preview) {
 	XwaModelPreview* m = &s->model_previews[s->model_preview_count++];
 	*m = *preview;
 	m->z_order = g_z_counter++;
-	m->target = (uint8_t)g_emit_target;
+	m->target = (uint8_t)snapshot_emit_target();
 }
 
 void XwaSnapshot_EmitGlyph(int font_size, unsigned char ch, int x, int y, uint32_t color) {
@@ -1595,7 +1633,7 @@ void XwaSnapshot_EmitGlyph(int font_size, unsigned char ch, int x, int y, uint32
 	}
 	XwaGlyph2D* g = &s->glyphs[s->glyph_count++];
 	g->z_order = g_z_counter++;
-	g->target = (uint8_t)g_emit_target;
+	g->target = (uint8_t)snapshot_emit_target();
 	g->ch = ch;
 	g->font_size = (int16_t)font_size;
 	g->x = (int16_t)x;

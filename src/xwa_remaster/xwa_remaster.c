@@ -385,6 +385,7 @@ int XwaRemaster_Init(const XwaRemasterInitOptions* options) {
 	snprintf(remaster_root, sizeof remaster_root, "%s/remaster", Aeron_AssetRoot());
 	g.assets = XwaRemasterAssets_Create(remaster_root, options->prefer_original_2d);
 	Aeron_BlendRampInit(&g.ramp);
+	g.last_tick = UINT64_MAX; /* Snapshot zero has not been rendered yet. */
 	g.mode = RM_VIEW_HD;
 	g.primary_mode = RM_VIEW_HD;
 	if (!Aeron_GetPresentationPixelSize(&g.render_pixel_width, &g.render_pixel_height)) {
@@ -621,8 +622,14 @@ void XwaRemaster_Frame(int32_t delta_us) {
 		!retain_invalid_flight_frame && (frontend_assets_need_sync || ship_assets_need_sync ||
 										 texture_assets_need_sync || process_assets_need_prepare);
 	const int render_snapshot = snap->tick_index != g.last_tick || g.force_scene_render;
+	const int frontend_scene = snap->scene_kind == XWA_SCENE_FRONTEND ||
+							   snap->scene_kind == XWA_SCENE_FRONTEND_MODAL ||
+							   snap->scene_kind == XWA_SCENE_LOADING;
+	const int frontend_idle = frontend_scene && !snap->draw_2d_count && !snap->paint_cmd_count &&
+							  !snap->glyph_count && !snap->surface_event_count && !snap->model_preview_count;
+	/* Idle host ticks reuse the frontend output and its cursor textures. */
 	const int retain_scene_frame =
-		!render_snapshot ||
+		!render_snapshot || frontend_idle ||
 		(snap->scene_kind == XWA_SCENE_LOADING && !XwaRemaster_SnapshotHasPresent(snap)) ||
 		retain_invalid_flight_frame;
 	int assets_pending = 0;
@@ -814,8 +821,9 @@ void XwaRemaster_Frame(int32_t delta_us) {
 		return;
 	}
 
-	/* Crossfade toward the overlay unless CLASSIC / nothing rendered. */
-	const float target = (g.scene_tex && g.mode != RM_VIEW_CLASSIC) ? 1.0f : 0.0f;
+	/* Only view switches drive the fade. Missing output falls back to classic
+	 * below without fading down HD, so the first ready HD frame is opaque. */
+	const float target = g.mode != RM_VIEW_CLASSIC ? 1.0f : 0.0f;
 	g.ramp.target = target;
 	Aeron_BlendRampAdvance(&g.ramp, delta_us, target);
 	if (!g.scene_tex || g.ramp.alpha <= 0.001f) {
@@ -857,6 +865,9 @@ void XwaRemaster_Frame(int32_t delta_us) {
 	if (!Aeron_SubmitTextureLayer(&layer)) {
 		XwaRemaster_FatalGpu("HD texture-layer presentation");
 	}
+	if (g.scene_kind == XWA_SCENE_FRONTEND || g.scene_kind == XWA_SCENE_FRONTEND_MODAL ||
+		g.scene_kind == XWA_SCENE_LOADING)
+		XwaRemasterFrontend_PresentCursor(g.ramp.alpha, g.mode == RM_VIEW_SPLIT);
 }
 
 void XwaRemaster_Shutdown(void) {
